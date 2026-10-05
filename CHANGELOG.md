@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.0 — 2026-10-05
+
+- **Planimetrie in PDF**: in *Aggiungi immagine → Dall'alto / planimetria* si può caricare un PDF. L'app mostra le pagine, si sceglie quella giusta e si può ritagliare solo una parte (es. la pianta del piano terra da una tavola con più disegni). Il PDF viene convertito in immagine ad alta risoluzione nel browser (pdf.js, caricato solo quando serve).
+- **Scala del disegno**: per i PDF basta indicare la scala (1:100, 1:200…) e la larghezza reale viene calcolata dalle misure del foglio. Per scansioni e foto della tavola resta la calibrazione con una quota nota.
+- Il server serve i file `.mjs` (worker di pdf.js) con il tipo MIME corretto.
+
+
 ## v1.1.0 — 2026-10-05
 
 Impianti, piastre e foto.

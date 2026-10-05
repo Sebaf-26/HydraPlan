@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "../api.js";
 import { prepareImage } from "../photos.js";
+import PdfPagePicker from "./PdfPagePicker.jsx";
 
 const TILE = 256;
 const MAX_TILES = 144;
@@ -111,6 +112,8 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
   const [progress, setProgress] = useState(0);
   const [photo, setPhoto] = useState(null); // { file, ratio, url }
   const [width, setWidth] = useState("20");
+  const [pdf, setPdf] = useState(null); // File being imported
+  const [scale, setScale] = useState("100");
 
   // New backgrounds go where the user is looking.
   const origin = () => (view ? [view.x + size.w / view.scale / 2, view.y + size.h / view.scale / 2] : [0, 0]);
@@ -121,7 +124,9 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
 
   async function pickPhoto(ev) {
     const f = ev.target.files?.[0];
+    ev.target.value = "";
     if (!f) return;
+    if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) return setPdf(f);
     setBusy(true);
     try {
       // PNG plans keep their sharp lines; everything else (HEIC too) is re-encoded as JPEG.
@@ -130,6 +135,23 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
       const bmp = await createImageBitmap(blob);
       const file = await upload(blob);
       setPhoto({ file, ratio: bmp.height / bmp.width, url: URL.createObjectURL(blob), name: f.name.replace(/\.[^.]+$/, ""), date: img?.date || "" });
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pdfDone(r) {
+    setPdf(null);
+    setBusy(true);
+    try {
+      const bmp = await createImageBitmap(r.blob);
+      const file = await upload(r.blob);
+      // Paper size of the crop in metres: with a 1:N drawing, real width = paper width × N.
+      const paperW = (r.widthPt / 72) * 0.0254;
+      setPhoto({ file, ratio: bmp.height / bmp.width, url: URL.createObjectURL(r.blob), name: r.name, date: "", paperW });
+      setWidth(String(Math.round(paperW * Number(scale || 100) * 100) / 100));
     } catch (err) {
       onError(err);
     } finally {
@@ -162,7 +184,7 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
 
   return (
     <div className="modal-backdrop" onPointerDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div className="modal card">
+      <div className={"modal card" + (pdf ? " wide" : "")}>
         <div className="row">
           <h3 className="grow">Aggiungi immagine a “{plan.name}”</h3>
           <button className="ghost" onClick={onClose} disabled={busy}>×</button>
@@ -182,20 +204,43 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
             </label>
           </>
         ) : mode === "photo" ? (
-          photo ? (
+          pdf ? (
+            <PdfPagePicker file={pdf} onDone={pdfDone} onCancel={() => setPdf(null)} onError={onError} />
+          ) : photo ? (
             <>
               <img className="preview" src={photo.url} alt="" />
+              {photo.paperW > 0 && (
+                <label>
+                  Scala del disegno
+                  <span className="with-suffix">
+                    <span>1 :</span>
+                    <input
+                      type="number" inputMode="numeric" min="1" step="1" value={scale}
+                      onChange={(e) => {
+                        setScale(e.target.value);
+                        const n = Number(e.target.value);
+                        if (n > 0) setWidth(String(Math.round(photo.paperW * n * 100) / 100));
+                      }}
+                    />
+                  </span>
+                </label>
+              )}
               <label>
                 Quanto è larga in realtà l'area dell'immagine? (metri)
-                <input type="number" inputMode="decimal" step="0.5" value={width} onChange={(e) => setWidth(e.target.value)} autoFocus />
+                <input type="number" inputMode="decimal" step="0.5" value={width} onChange={(e) => setWidth(e.target.value)} autoFocus={!photo.paperW} />
               </label>
-              <p className="muted small">Va bene anche a occhio: dopo puoi usare <b>Calibra con una misura</b> tracciando una distanza che conosci.</p>
+              <p className="muted small">
+                {photo.paperW > 0
+                  ? "La scala funziona se il PDF è il file originale del tecnico (in scala reale). Per scansioni o foto della tavola la misura del foglio non è affidabile: dopo usa "
+                  : "Va bene anche a occhio: dopo puoi usare "}
+                <b>Calibra con una misura</b> tracciando una quota che conosci.
+              </p>
               <button className="primary" onClick={confirmPhoto}>Aggiungi al progetto</button>
             </>
           ) : (
             <label className="dropzone">
-              <input type="file" accept="image/*" onChange={pickPhoto} hidden />
-              {busy ? "Caricamento…" : "Scegli una foto dall'alto (drone, dal balcone), uno screenshot o una planimetria"}
+              <input type="file" accept="image/*,application/pdf,.pdf" onChange={pickPhoto} hidden />
+              {busy ? "Caricamento…" : "Scegli una planimetria (PDF o immagine), una foto dall'alto (drone, dal balcone) o uno screenshot"}
             </label>
           )
         ) : (

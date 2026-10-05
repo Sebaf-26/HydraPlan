@@ -11,7 +11,7 @@ Planner self-hosted per gli schemi del giardino (e in futuro della casa), sullo 
 - **Impianti**: corrugati e tubi con contenuto (elettrico, dati, acqua, irrigazione, scarico, gas, predisposizione), diametro e profondità, colorati per contenuto ed etichettati lungo il tracciato; **pozzetti** con misura, profondità e chiusino. Il riepilogo somma i metri di tubo per contenuto.
 - **Piastre calpestabili**: strumento a timbro con formati pronti, materiale e rotazione.
 - **Immagini sovrapposte** (quante vuoi): ognuna si sposta, ruota, scala, si rende trasparente o si nasconde. Puoi aggiungere:
-  - **foto dall'alto o planimetria**, dando la larghezza reale;
+  - **planimetria in PDF o immagine**, o foto dall'alto: per i PDF scegli la pagina, ritagli la parte che serve e indichi la scala (1:100) oppure la larghezza reale;
   - **foto da raddrizzare**: una foto scattata di traverso diventa una vista dall'alto in scala. Basta indicare i 4 angoli di qualcosa di cui conosci la misura (una piastra, un chiusino, un foglio A4);
   - **vista satellitare** (Esri World Imagery): cerchi l'indirizzo e inquadri il giardino, già in scala.
 
