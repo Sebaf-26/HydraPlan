@@ -71,7 +71,7 @@ npm run dev                                                                  # V
 
 1. Portainer → **Stacks → Add stack → Repository**:
    - URL `https://github.com/Sebaf-26/HydraPlan`, ref `refs/heads/main`, compose path `docker-compose.yml`.
-   - Il repo è **privato**: attiva **Authentication** con username `Sebaf-26` e un GitHub fine-grained token con *Contents: Read-only* su questo repo.
+   - Il repo è pubblico: non serve l'Authentication.
    - Environment variables (vedi [`.env.example`](.env.example)):
      - `ADMIN_USERNAME` e `ADMIN_PASSWORD`: **obbligatorie**, senza il container si ferma. Cambiare la password scollega tutti i dispositivi;
      - `PORT`: default `8094`, uguale dentro e fuori dal container.

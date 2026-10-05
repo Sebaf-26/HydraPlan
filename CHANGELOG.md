@@ -9,4 +9,5 @@ Prima versione.
 - Libreria di circa 50 piante con chioma e altezza da adulte, più specie personalizzate. Per ogni pianta: diametro, data di messa a dimora e note.
 - Sfondo da foto o planimetria, oppure dalla vista satellitare Esri già in scala, con calibrazione tramite una misura nota, opacità e spostamento.
 - Riepilogo in m² per tipo di superficie e conteggio delle piante; esportazione come immagine con barra di scala.
+- Repo pubblico `Sebaf-26/HydraPlan` (era `InfraMap`).
 - Login con ADMIN_USERNAME e ADMIN_PASSWORD, dati nel volume `/data`, stack Portainer sulla porta 8094.
