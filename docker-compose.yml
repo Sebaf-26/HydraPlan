@@ -1,0 +1,20 @@
+services:
+  hydraplan:
+    build: .
+    # Built from this repo, never pulled from a registry.
+    pull_policy: build
+    container_name: hydraplan-app
+    ports:
+      - "${PORT:-8094}:${PORT:-8094}"
+    environment:
+      # Port the app listens on (same number inside and outside the container).
+      - PORT=${PORT:-8094}
+      # Required: the container exits without them.
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    volumes:
+      - hydraplan-data:/data
+    restart: unless-stopped
+
+volumes:
+  hydraplan-data:
