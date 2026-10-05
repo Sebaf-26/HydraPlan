@@ -10,7 +10,7 @@ const blobToDataUrl = (blob) =>
 
 // Renders the whole plan (not just the visible part) to an image and downloads it.
 export async function exportPng(svg, plan) {
-  const b = bounds(plan.elements, plan.background);
+  const b = bounds(plan.elements, plan.overlays);
   if (!b) throw new Error("il progetto è vuoto");
   const margin = Math.max(1, (b.maxX - b.minX) * 0.04);
   const x = b.minX - margin, y = b.minY - margin;
@@ -37,11 +37,10 @@ export async function exportPng(svg, plan) {
   style.textContent = `text{font-family:-apple-system,Helvetica,Arial,sans-serif}
 .area-label{fill:#1f2a1f;font-weight:600}.area-label .sub{font-weight:400;fill:#3b4a3b}
 .plant-label{fill:#142014;font-weight:600}.dim-label{fill:${css.getPropertyValue("--dim")};font-weight:600}
-.free-label{font-weight:600}`;
+.free-label{font-weight:600}.pipe-label,.pozzetto-label{font-weight:600}.photo-pin{fill:#e65100;stroke:#fff}`;
   clone.prepend(style);
 
-  const image = clone.querySelector("image");
-  if (image) {
+  for (const image of clone.querySelectorAll("image")) {
     const res = await fetch(image.getAttribute("href"));
     image.setAttribute("href", await blobToDataUrl(await res.blob()));
   }
@@ -70,7 +69,7 @@ export async function exportPng(svg, plan) {
   ctx.fillText(`${meters} m`, 24, H - 28);
 
   // With a photo underneath PNG gets huge for no gain: use JPEG then.
-  const type = plan.background ? "image/jpeg" : "image/png";
+  const type = plan.overlays.some((o) => !o.hidden) ? "image/jpeg" : "image/png";
   const blob = await new Promise((r) => canvas.toBlob(r, type, 0.9));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

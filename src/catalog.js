@@ -88,8 +88,50 @@ export const LINE_KINDS = {
   siepe: { label: "Siepe", color: "#2f6b4a", width: 0.8 },
   bordura: { label: "Bordura", color: "#7a6a5a", width: 0.1 },
   irrigazione: { label: "Irrigazione", color: "#2b7fc0", width: 0, dash: "2 3" },
-  elettrico: { label: "Cavo elettrico", color: "#e0a020", width: 0, dash: "8 3 2 3" }
+  elettrico: { label: "Cavo elettrico", color: "#e0a020", width: 0, dash: "8 3 2 3" },
+  corrugato: { label: "Corrugato / tubo", color: "#d32f2f", width: 0, pipe: true }
 };
+
+// Underground lines (pipes, cables) are "impianti": they can be hidden as a group.
+export const UTILITY_KINDS = new Set(["corrugato", "irrigazione", "elettrico"]);
+
+// What runs inside a duct; colours follow the usual Italian corrugated-pipe colours.
+export const PIPE_CONTENTS = {
+  elettrico: { label: "Elettrico", color: "#d32f2f" },
+  dati: { label: "Dati / telefono", color: "#2e7d32" },
+  acqua: { label: "Acqua", color: "#1565c0" },
+  irrigazione: { label: "Irrigazione", color: "#29a3d6" },
+  scarico: { label: "Scarico", color: "#6d4c41" },
+  gas: { label: "Gas", color: "#f2b705" },
+  vuoto: { label: "Predisposizione (vuoto)", color: "#7b7f86" }
+};
+export const PIPE_DIAMETERS = [20, 25, 32, 40, 50, 63, 75, 90, 110, 125, 160];
+
+export const STONE_PRESETS = [
+  { label: "40×40", w: 0.4, h: 0.4, shape: "rect" },
+  { label: "50×50", w: 0.5, h: 0.5, shape: "rect" },
+  { label: "60×60", w: 0.6, h: 0.6, shape: "rect" },
+  { label: "40×60", w: 0.4, h: 0.6, shape: "rect" },
+  { label: "30×60", w: 0.3, h: 0.6, shape: "rect" },
+  { label: "Ø 40", w: 0.4, h: 0.4, shape: "round" },
+  { label: "Ø 50", w: 0.5, h: 0.5, shape: "round" }
+];
+export const STONE_MATERIALS = {
+  pietra: { label: "Pietra", color: "#b9b3a6" },
+  cemento: { label: "Cemento", color: "#c7c7c2" },
+  legno: { label: "Legno", color: "#a87b4f" },
+  travertino: { label: "Travertino", color: "#e3d8bf" },
+  ardesia: { label: "Ardesia", color: "#6f7478" }
+};
+
+export const POZZETTO_PRESETS = [
+  { label: "20×20", w: 0.2, h: 0.2 },
+  { label: "30×30", w: 0.3, h: 0.3 },
+  { label: "40×40", w: 0.4, h: 0.4 },
+  { label: "50×50", w: 0.5, h: 0.5 },
+  { label: "60×60", w: 0.6, h: 0.6 }
+];
+export const POZZETTO_COVERS = ["Cemento", "Ghisa", "Plastica", "Grigliato", "Da riempimento (piastrella/prato)"];
 
 export const PLAN_KINDS = {
   giardino: "Giardino",

@@ -5,6 +5,8 @@ import { bounds, dist, uid } from "../geometry.js";
 import PlanCanvas from "./PlanCanvas.jsx";
 import Inspector from "./Inspector.jsx";
 import BackgroundDialog from "./BackgroundDialog.jsx";
+import PhotoRectify from "./PhotoRectify.jsx";
+import { uploadPhotos } from "../photos.js";
 import Icon from "./Icon.jsx";
 import { exportPng } from "../exportPng.js";
 
@@ -15,10 +17,14 @@ const TOOLS = [
   { id: "poly", label: "Forma libera", key: "p" },
   { id: "line", label: "Linea / vialetto", key: "l" },
   { id: "plant", label: "Pianta", key: "a" },
+  { id: "stone", label: "Piastra", key: "s" },
+  { id: "pozzetto", label: "Pozzetto", key: "o" },
+  { id: "photo", label: "Foto sul posto", key: "f" },
   { id: "label", label: "Testo", key: "t" },
   { id: "dim", label: "Quota", key: "m" }
 ];
-const CURSORS = { select: "default", pan: "grab", plant: "copy", label: "text" };
+const CURSORS = { select: "default", pan: "grab", plant: "copy", stone: "copy", pozzetto: "copy", label: "text" };
+const hiddenKey = (id) => "hydraplan_hidden_" + id;
 const MIN_SCALE = 0.3, MAX_SCALE = 3000;
 
 const viewKey = (id) => "hydraplan_view_" + id;
@@ -33,6 +39,7 @@ function storedView(id) {
 
 export default function Editor({ id, plants, onError }) {
   const [plan, setPlan] = useState(null);
+  const selectedIdRef = useRef(null);
   const [view, setView] = useState(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [tool, setToolState] = useState("select");
@@ -44,6 +51,19 @@ export default function Editor({ id, plants, onError }) {
   const [saveState, setSaveState] = useState("saved");
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth > 800);
   const [bgDialog, setBgDialog] = useState(false);
+  const [rectifySource, setRectifySource] = useState(null);
+  const [stoneOpts, setStoneOpts] = useState({ w: 0.4, h: 0.4, shape: "rect", material: "pietra", rotation: 0 });
+  const [pozzOpts, setPozzOpts] = useState({ w: 0.4, h: 0.4, cover: "Cemento" });
+  const [pipeOpts, setPipeOpts] = useState({ content: "elettrico", diameter: 63, depth: 40 });
+  const [hidden, setHiddenState] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(hiddenKey(id))) || []);
+    } catch {
+      return new Set();
+    }
+  });
+  const photoInput = useRef(null);
+  const photoPoint = useRef(null);
 
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
@@ -61,6 +81,7 @@ export default function Editor({ id, plants, onError }) {
     draftRef.current = d;
     setDraftState(d);
   };
+  selectedIdRef.current = selectedId;
   const applyView = useCallback((v) => {
     viewRef.current = v;
     setView(v);
@@ -93,11 +114,29 @@ export default function Editor({ id, plants, onError }) {
     redo.current = [];
   };
 
+  // Works for drawing elements and for overlay images alike (ids are unique across both).
   const updateElement = useCallback(
     (eid, patch, record = true) =>
-      change((p) => ({ ...p, elements: p.elements.map((e) => (e.id === eid ? { ...e, ...(typeof patch === "function" ? patch(e) : patch) } : e)) }), record),
+      change((p) => {
+        const apply = (e) => (e.id === eid ? { ...e, ...(typeof patch === "function" ? patch(e) : patch) } : e);
+        return p.overlays.some((o) => o.id === eid) ? { ...p, overlays: p.overlays.map(apply) } : { ...p, elements: p.elements.map(apply) };
+      }, record),
     [change]
   );
+
+  const addOverlay = (o) => {
+    const ov = { id: uid(), rotation: 0, hidden: false, ...o };
+    change((p) => ({ ...p, overlays: [...p.overlays, ov] }));
+    setSelectedId(ov.id);
+    setToolState("select");
+  };
+
+  const setHidden = (next) => {
+    setHiddenState(next);
+    try {
+      localStorage.setItem(hiddenKey(id), JSON.stringify([...next]));
+    } catch {}
+  };
 
   const addElement = (el, select = true) => {
     const e = { id: uid(), name: "", note: "", ...el };
@@ -111,7 +150,7 @@ export default function Editor({ id, plants, onError }) {
 
   const removeElement = useCallback(
     (eid) => {
-      change((p) => ({ ...p, elements: p.elements.filter((e) => e.id !== eid) }));
+      change((p) => ({ ...p, elements: p.elements.filter((e) => e.id !== eid), overlays: p.overlays.filter((o) => o.id !== eid) }));
       setSelectedId(null);
     },
     [change]
@@ -124,7 +163,7 @@ export default function Editor({ id, plants, onError }) {
     planRef.current = value;
     dirty.current = true;
     setPlan(value);
-    if (selectedId && !value.elements.some((e) => e.id === selectedId)) setSelectedId(null);
+    if (selectedId && !value.elements.some((e) => e.id === selectedId) && !value.overlays.some((o) => o.id === selectedId)) setSelectedId(null);
   }
 
   // ---------- load / save ----------
@@ -197,7 +236,7 @@ export default function Editor({ id, plants, onError }) {
   const fit = useCallback(() => {
     const p = planRef.current;
     if (!p || !size.w) return;
-    const b = bounds(p.elements, p.background) || { minX: 0, minY: 0, maxX: 20, maxY: 15 };
+    const b = bounds(p.elements, p.overlays) || { minX: 0, minY: 0, maxX: 20, maxY: 15 };
     const w = Math.max(b.maxX - b.minX, 2), h = Math.max(b.maxY - b.minY, 2);
     const scale = Math.min(MAX_SCALE, Math.min(size.w / w, size.h / h) * 0.88);
     applyView({ scale, x: b.minX - (size.w / scale - w) / 2, y: b.minY - (size.h / scale - h) / 2 });
@@ -263,7 +302,7 @@ export default function Editor({ id, plants, onError }) {
     const pl = planRef.current;
     return !pl.snap || ev?.shiftKey ? v : Math.max(pl.snapStep, Math.round(v / pl.snapStep) * pl.snapStep);
   };
-  const find = (eid) => planRef.current.elements.find((e) => e.id === eid);
+  const find = (eid) => planRef.current.elements.find((e) => e.id === eid) || planRef.current.overlays.find((o) => o.id === eid);
 
   function finishPath() {
     const d = draftRef.current;
@@ -275,23 +314,31 @@ export default function Editor({ id, plants, onError }) {
     if (d.type === "poly" && pts.length >= 3) addElement({ type: "area", kind: areaKind, color: "", points: pts });
     else if (d.type === "line" && pts.length >= 2) {
       const width = { vialetto: 1, muro: 0.3, siepe: 0.8, bordura: 0.1 }[lineKind] ?? 0;
-      addElement({ type: "line", kind: lineKind, color: "", width, points: pts });
+      const pipe = lineKind === "corrugato" ? pipeOpts : lineKind === "irrigazione" || lineKind === "elettrico" ? { depth: pipeOpts.depth } : {};
+      addElement({ type: "line", kind: lineKind, color: "", width, points: pts, ...pipe });
     }
   }
 
+  // The overlay being calibrated: the selected one, otherwise the top visible one.
+  const calibrationTarget = () => {
+    const ovs = planRef.current.overlays.filter((o) => !o.hidden);
+    return ovs.find((o) => o.id === selectedIdRef.current) || ovs[ovs.length - 1];
+  };
+
   function calibrate(points) {
-    const bg = planRef.current.background;
+    const bg = calibrationTarget();
     const measured = dist(points[0], points[1]);
     if (!bg || measured <= 0) return;
-    const answer = prompt(`Hai tracciato ${measured.toFixed(2).replace(".", ",")} m sullo sfondo.\nQuanto è lungo davvero, in metri?`);
+    const answer = prompt(`Hai tracciato ${measured.toFixed(2).replace(".", ",")} m su “${bg.name}”.\nQuanto è lungo davvero, in metri?`);
     const real = Number(String(answer || "").replace(",", "."));
     if (!(real > 0)) return;
     const f = real / measured;
     const [ox, oy] = points[0];
-    change((p) => ({
-      ...p,
-      background: { ...bg, x: ox - (ox - bg.x) * f, y: oy - (oy - bg.y) * f, width: bg.width * f, height: bg.height * f }
-    }));
+    // Scale about the first point: the centre moves, the rotation stays.
+    const cx = ox + (bg.x + bg.width / 2 - ox) * f, cy = oy + (bg.y + bg.height / 2 - oy) * f;
+    const w = bg.width * f, h = bg.height * f;
+    updateElement(bg.id, { x: cx - w / 2, y: cy - h / 2, width: w, height: h });
+    setSelectedId(bg.id);
     setToolState("select");
   }
 
@@ -321,7 +368,7 @@ export default function Editor({ id, plants, onError }) {
     if (ev.button !== 0) return;
 
     const p = toWorld(ev.clientX, ev.clientY);
-    const target = ev.target.closest?.("[data-handle],[data-id],[data-bg]");
+    const target = ev.target.closest?.("[data-handle],[data-id],[data-ov]");
 
     if (tool === "select") {
       if (target?.dataset.handle) {
@@ -336,9 +383,10 @@ export default function Editor({ id, plants, onError }) {
         drag.current = { mode: "move", id: eid, start: p, orig: el, started: false };
         return;
       }
-      if (target && "bg" in target.dataset) {
-        setSelectedId(null);
-        drag.current = { mode: "bg", start: p, orig: planRef.current.background, started: false };
+      if (target?.dataset.ov) {
+        // unlocked overlay image: select it and drag it around
+        setSelectedId(target.dataset.ov);
+        drag.current = { mode: "move", id: target.dataset.ov, start: p, orig: find(target.dataset.ov), started: false };
         return;
       }
       setSelectedId(null);
@@ -363,6 +411,20 @@ export default function Editor({ id, plants, onError }) {
     if (tool === "plant") {
       const species = plants.get(plantId);
       addElement({ type: "plant", plantId, x: s[0], y: s[1], d: species?.d || 1, color: "", planted: "" }, false);
+      return;
+    }
+    if (tool === "stone") {
+      addElement({ type: "stone", x: s[0], y: s[1], w: stoneOpts.w, h: stoneOpts.h, shape: stoneOpts.shape, material: stoneOpts.material, rotation: stoneOpts.rotation, color: "" }, false);
+      return;
+    }
+    if (tool === "pozzetto") {
+      const n = planRef.current.elements.filter((e) => e.type === "pozzetto").length + 1;
+      addElement({ type: "pozzetto", name: "P" + n, x: s[0], y: s[1], w: pozzOpts.w, h: pozzOpts.h, cover: pozzOpts.cover, depth: 0, rotation: 0, color: "" });
+      return;
+    }
+    if (tool === "photo") {
+      photoPoint.current = s;
+      photoInput.current?.click();
       return;
     }
     if (tool === "label") {
@@ -413,15 +475,6 @@ export default function Editor({ id, plants, onError }) {
       updateElement(g.id, o.points ? { points: o.points.map(([x, y]) => [x + dx, y + dy]) } : { x: o.x + dx, y: o.y + dy }, false);
       return;
     }
-    if (g?.mode === "bg") {
-      let dx = p[0] - g.start[0], dy = p[1] - g.start[1];
-      if (!g.started) {
-        g.started = true;
-        snapshot();
-      }
-      change((pl) => ({ ...pl, background: { ...g.orig, x: g.orig.x + dx, y: g.orig.y + dy } }), false);
-      return;
-    }
     if (g?.mode === "handle") {
       if (!g.started) {
         g.started = true;
@@ -429,9 +482,23 @@ export default function Editor({ id, plants, onError }) {
       }
       const s = snapPt(p, ev);
       const [kind, idx] = g.handle.split(":");
+      const el = find(g.id);
       if (kind === "r") {
-        const el = find(g.id);
         updateElement(g.id, { d: snapLen(2 * dist([el.x, el.y], p), ev) }, false);
+      } else if (kind === "rot") {
+        // Rotate around the centre; snaps to 15° steps unless Shift is held.
+        const [cx, cy] = el.file ? [el.x + el.width / 2, el.y + el.height / 2] : [el.x, el.y];
+        let deg = (Math.atan2(p[1] - cy, p[0] - cx) * 180) / Math.PI + 90;
+        if (!ev.shiftKey) deg = Math.round(deg / 15) * 15;
+        deg = ((deg + 540) % 360) - 180;
+        updateElement(g.id, { rotation: Math.round(deg * 10) / 10 }, false);
+      } else if (kind === "sc") {
+        // Proportional scaling of an overlay around its centre.
+        g.orig ||= el;
+        const o = g.orig;
+        const cx = o.x + o.width / 2, cy = o.y + o.height / 2;
+        const f = dist([cx, cy], p) / (Math.hypot(o.width, o.height) / 2);
+        if (f > 0.01) updateElement(g.id, { x: cx - (o.width * f) / 2, y: cy - (o.height * f) / 2, width: o.width * f, height: o.height * f }, false);
       } else if (kind === "m") {
         // Dragging a midpoint inserts a new vertex there and keeps dragging it.
         const i = Number(idx) + 1;
@@ -533,6 +600,13 @@ export default function Editor({ id, plants, onError }) {
         const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
         return updateElement(selectedId, (e) => (e.points ? { points: e.points.map(([x, y]) => [x + dx, y + dy]) } : { x: e.x + dx, y: e.y + dy }));
       }
+      if ((ev.key === "[" || ev.key === "]") && selectedId) {
+        const el = find(selectedId);
+        if (el && "rotation" in el) {
+          const step = (ev.shiftKey ? 1 : 15) * (ev.key === "[" ? -1 : 1);
+          return updateElement(selectedId, { rotation: ((el.rotation + step + 540) % 360) - 180 });
+        }
+      }
       if (ev.key === "+" || ev.key === "=") return zoomCenter(1.25);
       if (ev.key === "-") return zoomCenter(0.8);
       if (ev.key === "0") return fit();
@@ -550,7 +624,7 @@ export default function Editor({ id, plants, onError }) {
 
   function duplicate(eid) {
     const el = find(eid);
-    if (!el) return;
+    if (!el || el.file) return;
     const off = Math.max(0.5, planRef.current.snapStep * 5);
     const copy = el.points ? { ...el, points: el.points.map(([x, y]) => [x + off, y + off]) } : { ...el, x: el.x + off, y: el.y + off };
     delete copy.id;
@@ -559,6 +633,11 @@ export default function Editor({ id, plants, onError }) {
 
   function reorder(eid, toFront) {
     change((p) => {
+      if (p.overlays.some((o) => o.id === eid)) {
+        const ov = p.overlays.find((o) => o.id === eid);
+        const rest = p.overlays.filter((o) => o.id !== eid);
+        return { ...p, overlays: toFront ? [...rest, ov] : [ov, ...rest] };
+      }
       const el = p.elements.find((e) => e.id === eid);
       const rest = p.elements.filter((e) => e.id !== eid);
       return { ...p, elements: toFront ? [...rest, el] : [el, ...rest] };
@@ -578,8 +657,34 @@ export default function Editor({ id, plants, onError }) {
 
   if (!plan) return <div className="splash">Caricamento progetto…</div>;
 
-  const selected = plan.elements.find((e) => e.id === selectedId) || null;
-  const tools = plan.background ? [...TOOLS, { id: "calibrate", label: "Calibra sfondo", key: "k" }] : TOOLS;
+  const selected = plan.elements.find((e) => e.id === selectedId) || plan.overlays.find((o) => o.id === selectedId) || null;
+  const tools = plan.overlays.length ? [...TOOLS, { id: "calibrate", label: "Calibra immagine", key: "k" }] : TOOLS;
+
+  async function addPhotoPin(ev) {
+    const files = [...(ev.target.files || [])];
+    ev.target.value = "";
+    if (!files.length || !photoPoint.current) return;
+    try {
+      const photos = await uploadPhotos(files);
+      const [x, y] = photoPoint.current;
+      addElement({ type: "photo", x, y, photos });
+    } catch (err) {
+      onError(err);
+    }
+  }
+
+  function placeRectified(r) {
+    // Put the reference rectangle in the middle of the screen; the user then aligns it.
+    const v = viewRef.current;
+    const cx = v.x + size.w / v.scale / 2, cy = v.y + size.h / v.scale / 2;
+    const x = cx - r.refW / 2 - r.refX, y = cy - r.refH / 2 - r.refY;
+    addOverlay({
+      file: r.file, name: "Foto raddrizzata " + new Date().toLocaleDateString("it-IT"), x, y, width: r.width, height: r.height,
+      opacity: 0.85, locked: false, source: `Riferimento ${r.refW}×${r.refH} m`, date: new Date().toISOString().slice(0, 10)
+    });
+    setRectifySource(null);
+    setBgDialog(false);
+  }
   const cursor = spaceDown.current || tool === "pan" ? "grab" : CURSORS[tool] || "crosshair";
 
   return (
@@ -623,6 +728,7 @@ export default function Editor({ id, plants, onError }) {
               svgRef={svgRef}
               cursor={cursor}
               handlers={{ onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onDoubleClick }}
+              hidden={hidden}
             />
           )}
           {(tool === "poly" || tool === "line") && (
@@ -638,7 +744,11 @@ export default function Editor({ id, plants, onError }) {
               )}
             </div>
           )}
-          {tool === "calibrate" && <div className="hint">Traccia sullo sfondo una distanza che conosci (es. un lato della casa), poi inserisci la misura reale</div>}
+          {tool === "calibrate" && <div className="hint">Traccia su “{calibrationTarget()?.name}” una distanza che conosci (es. un lato della casa), poi inserisci la misura reale</div>}
+          {tool === "stone" && <div className="hint">Clicca per posare piastre {stoneOpts.shape === "round" ? "Ø" + stoneOpts.w * 100 : stoneOpts.w * 100 + "×" + stoneOpts.h * 100} cm · [ ] per ruotare quella selezionata</div>}
+          {tool === "pozzetto" && <div className="hint">Clicca dove si trova il pozzetto</div>}
+          {tool === "photo" && <div className="hint">Clicca nel punto dove hai scattato o che la foto mostra</div>}
+          <input ref={photoInput} type="file" accept="image/*" multiple hidden onChange={addPhotoPin} />
           {tool === "plant" && <div className="hint">Clicca dove vuoi mettere: {plants.get(plantId)?.name}</div>}
         </div>
 
@@ -660,6 +770,16 @@ export default function Editor({ id, plants, onError }) {
             duplicate={duplicate}
             reorder={reorder}
             openBackground={() => setBgDialog(true)}
+            hidden={hidden}
+            setHidden={setHidden}
+            stoneOpts={stoneOpts}
+            setStoneOpts={setStoneOpts}
+            pozzOpts={pozzOpts}
+            setPozzOpts={setPozzOpts}
+            pipeOpts={pipeOpts}
+            setPipeOpts={setPipeOpts}
+            onRectify={(src) => setRectifySource(src)}
+            onError={onError}
             startCalibrate={() => setTool("calibrate")}
             onClose={() => setPanelOpen(false)}
             onSelect={(eid) => setSelectedId(eid)}
@@ -674,13 +794,15 @@ export default function Editor({ id, plants, onError }) {
           size={size}
           onClose={() => setBgDialog(false)}
           onError={onError}
-          onSet={(background) => {
-            change((p) => ({ ...p, background }));
+          onSet={(overlay) => {
+            addOverlay(overlay);
             setBgDialog(false);
             setTimeout(fit, 0);
           }}
+          onRectify={(file) => setRectifySource(file)}
         />
       )}
+      {rectifySource && <PhotoRectify source={rectifySource} onClose={() => setRectifySource(null)} onDone={placeRectified} onError={onError} />}
     </div>
   );
 }

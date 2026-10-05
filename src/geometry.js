@@ -40,7 +40,15 @@ export function distToSegment(p, a, b) {
   return dist(p, [a[0] + t * dx, a[1] + t * dy]);
 }
 
-export function bounds(elements, background) {
+// Corners of a w×h box centred on (cx, cy) and rotated by `deg` degrees.
+export function boxCorners(cx, cy, w, h, deg) {
+  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map(([x, y]) => [cx + x * c - y * s, cy + x * s + y * c]);
+}
+
+export const overlayCorners = (o) => boxCorners(o.x + o.width / 2, o.y + o.height / 2, o.width, o.height, o.rotation || 0);
+
+export function bounds(elements, overlays = []) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const add = (x, y) => {
     minX = Math.min(minX, x); minY = Math.min(minY, y);
@@ -49,9 +57,10 @@ export function bounds(elements, background) {
   for (const e of elements) {
     if (e.points) e.points.forEach(([x, y]) => add(x, y));
     else if (e.type === "plant") { add(e.x - e.d / 2, e.y - e.d / 2); add(e.x + e.d / 2, e.y + e.d / 2); }
+    else if (e.w) boxCorners(e.x, e.y, e.w, e.h, e.rotation || 0).forEach(([x, y]) => add(x, y));
     else add(e.x, e.y);
   }
-  if (background) { add(background.x, background.y); add(background.x + background.width, background.y + background.height); }
+  for (const o of overlays) if (!o.hidden) overlayCorners(o).forEach(([x, y]) => add(x, y));
   return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
 }
 

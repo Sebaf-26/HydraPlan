@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "../api.js";
+import { prepareImage } from "../photos.js";
 
 const TILE = 256;
 const MAX_TILES = 144;
@@ -98,13 +99,13 @@ function SatellitePicker({ onCapture, busy }) {
       <div className="sat-map" ref={ref} />
       <p className="muted small">Inquadra il giardino (zoomma il più possibile): verrà salvato esattamente ciò che vedi nel riquadro, già in scala.</p>
       <button className="primary" disabled={busy} onClick={() => onCapture(mapRef.current)}>
-        {busy ? "Scarico le immagini…" : "Usa quest'area come sfondo"}
+        {busy ? "Scarico le immagini…" : "Aggiungi quest'area al progetto"}
       </button>
     </>
   );
 }
 
-export default function BackgroundDialog({ plan, view, size, onClose, onSet, onError }) {
+export default function BackgroundDialog({ plan, view, size, onClose, onSet, onError, onRectify }) {
   const [mode, setMode] = useState("photo");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -121,15 +122,14 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
   async function pickPhoto(ev) {
     const f = ev.target.files?.[0];
     if (!f) return;
-    if (!/^image\/(png|jpeg|webp)$/.test(f.type)) return alert("Usa un'immagine PNG, JPEG o WebP (le foto HEIC dell'iPhone vanno prima esportate in JPEG).");
     setBusy(true);
     try {
-      const url = URL.createObjectURL(f);
-      const img = new Image();
-      img.src = url;
-      await img.decode();
-      const file = await upload(f);
-      setPhoto({ file, ratio: img.naturalHeight / img.naturalWidth, url, name: f.name });
+      // PNG plans keep their sharp lines; everything else (HEIC too) is re-encoded as JPEG.
+      const img = f.type === "image/png" && f.size < 15e6 ? null : await prepareImage(f, 3200);
+      const blob = img ? img.blob : f;
+      const bmp = await createImageBitmap(blob);
+      const file = await upload(blob);
+      setPhoto({ file, ratio: bmp.height / bmp.width, url: URL.createObjectURL(blob), name: f.name.replace(/\.[^.]+$/, ""), date: img?.date || "" });
     } catch (err) {
       onError(err);
     } finally {
@@ -142,7 +142,7 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
     if (!(w > 0)) return alert("Inserisci la larghezza in metri");
     const h = w * photo.ratio;
     const [cx, cy] = origin();
-    onSet({ file: photo.file, x: cx - w / 2, y: cy - h / 2, width: w, height: h, opacity: 0.8, locked: false, source: photo.name });
+    onSet({ file: photo.file, name: photo.name, x: cx - w / 2, y: cy - h / 2, width: w, height: h, opacity: 0.8, locked: false, source: photo.name, date: photo.date });
   }
 
   async function capture(map) {
@@ -152,7 +152,7 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
       const shot = await captureArea(map, setProgress);
       const file = await upload(shot.blob);
       const [cx, cy] = origin();
-      onSet({ file, x: cx - shot.width / 2, y: cy - shot.height / 2, width: shot.width, height: shot.height, opacity: 0.85, locked: true, source: shot.source });
+      onSet({ file, name: "Satellite", x: cx - shot.width / 2, y: cy - shot.height / 2, width: shot.width, height: shot.height, opacity: 0.85, locked: true, source: shot.source });
     } catch (err) {
       onError(err);
     } finally {
@@ -164,15 +164,24 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
     <div className="modal-backdrop" onPointerDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
       <div className="modal card">
         <div className="row">
-          <h3 className="grow">Sfondo di “{plan.name}”</h3>
+          <h3 className="grow">Aggiungi immagine a “{plan.name}”</h3>
           <button className="ghost" onClick={onClose} disabled={busy}>×</button>
         </div>
         <div className="segmented">
-          <button className={mode === "photo" ? "active" : ""} onClick={() => setMode("photo")}>Foto / planimetria</button>
-          <button className={mode === "sat" ? "active" : ""} onClick={() => setMode("sat")}>Vista satellitare</button>
+          <button className={mode === "photo" ? "active" : ""} onClick={() => setMode("photo")}>Dall'alto / planimetria</button>
+          <button className={mode === "rectify" ? "active" : ""} onClick={() => setMode("rectify")}>Foto da raddrizzare</button>
+          <button className={mode === "sat" ? "active" : ""} onClick={() => setMode("sat")}>Satellite</button>
         </div>
 
-        {mode === "photo" ? (
+        {mode === "rectify" ? (
+          <>
+            <p className="muted small">Per le foto scattate in piedi, di traverso: indichi 4 angoli di qualcosa di cui conosci la misura e la foto diventa una vista dall'alto in scala, da sovrapporre al disegno per ricalcare piastre, aiuole, tubi negli scavi…</p>
+            <label className="dropzone">
+              <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && onRectify(e.target.files[0])} hidden />
+              Scegli o scatta una foto
+            </label>
+          </>
+        ) : mode === "photo" ? (
           photo ? (
             <>
               <img className="preview" src={photo.url} alt="" />
@@ -181,12 +190,12 @@ export default function BackgroundDialog({ plan, view, size, onClose, onSet, onE
                 <input type="number" inputMode="decimal" step="0.5" value={width} onChange={(e) => setWidth(e.target.value)} autoFocus />
               </label>
               <p className="muted small">Va bene anche a occhio: dopo puoi usare <b>Calibra con una misura</b> tracciando una distanza che conosci.</p>
-              <button className="primary" onClick={confirmPhoto}>Usa come sfondo</button>
+              <button className="primary" onClick={confirmPhoto}>Aggiungi al progetto</button>
             </>
           ) : (
             <label className="dropzone">
-              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={pickPhoto} hidden />
-              {busy ? "Caricamento…" : "Scegli una foto dall'alto, uno screenshot o una planimetria"}
+              <input type="file" accept="image/*" onChange={pickPhoto} hidden />
+              {busy ? "Caricamento…" : "Scegli una foto dall'alto (drone, dal balcone), uno screenshot o una planimetria"}
             </label>
           )
         ) : (

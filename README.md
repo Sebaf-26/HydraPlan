@@ -8,11 +8,16 @@ Planner self-hosted per gli schemi del giardino (e in futuro della casa), sullo 
 - **Disegno in scala**: rettangoli e forme libere (prato, aiuola, orto, ghiaia, pavimentazione, deck, acqua, edificio, stanza), linee con larghezza reale (vialetto, siepe, muro, bordura) o sottili (recinzione, irrigazione, cavi), quote ed etichette di testo. Mentre disegni vedi le misure; selezionando un'area ne vedi superficie e perimetro.
 - **Modifica**: trascini oggetti e vertici. Trascinando i quadratini a metà di un lato aggiungi un vertice, con doppio clic su un vertice lo togli. Ci sono duplica, blocca, porta sopra/sotto, annulla/ripeti e la griglia con aggancio configurabile (Maiusc lo disattiva al volo).
 - **Piante**: una libreria di circa 50 specie (alberi, alberi da frutto, arbusti, siepi, fiori, aromatiche, ortaggi, rampicanti, graminacee) con diametro della chioma e altezza da adulte. Ogni pianta messa nel progetto ha diametro, data di messa a dimora e note. Nella pagina **Libreria piante** puoi aggiungere specie tue o varianti di quelle esistenti.
-- **Sfondo**:
-  - **foto o planimetria** caricata, dando la larghezza reale;
-  - **vista satellitare** (Esri World Imagery): cerchi l'indirizzo, inquadri il giardino e l'immagine viene salvata già in scala.
+- **Impianti**: corrugati e tubi con contenuto (elettrico, dati, acqua, irrigazione, scarico, gas, predisposizione), diametro e profondità, colorati per contenuto ed etichettati lungo il tracciato; **pozzetti** con misura, profondità e chiusino. Il riepilogo somma i metri di tubo per contenuto.
+- **Piastre calpestabili**: strumento a timbro con formati pronti, materiale e rotazione.
+- **Immagini sovrapposte** (quante vuoi): ognuna si sposta, ruota, scala, si rende trasparente o si nasconde. Puoi aggiungere:
+  - **foto dall'alto o planimetria**, dando la larghezza reale;
+  - **foto da raddrizzare**: una foto scattata di traverso diventa una vista dall'alto in scala. Basta indicare i 4 angoli di qualcosa di cui conosci la misura (una piastra, un chiusino, un foglio A4);
+  - **vista satellitare** (Esri World Imagery): cerchi l'indirizzo e inquadri il giardino, già in scala.
 
-  In entrambi i casi **Calibra con una misura** permette di tracciare una distanza nota e correggere la scala. Lo sfondo si può spostare e se ne regola l'opacità.
+  **Calibra con una misura** corregge la scala tracciando una distanza nota.
+- **Foto dei lavori** allegate a qualsiasi oggetto o a un punto della mappa (strumento *Foto sul posto*), con data e didascalia: per esempio lo scavo del corrugato prima del rinterro.
+- **Livelli** da mostrare o nascondere: immagini, aree, percorsi, impianti interrati, piastre, piante, testi, foto.
 - **Riepilogo**: m² per tipo di superficie e conteggio delle piante per specie.
 - **Esporta** tutto il progetto come immagine con barra di scala: PNG, oppure JPEG se c'è uno sfondo.
 
@@ -21,7 +26,9 @@ Planner self-hosted per gli schemi del giardino (e in futuro della casa), sullo 
 | Tasto | Azione |
 |---|---|
 | V H R P L A T M | seleziona, sposta vista, rettangolo, forma libera, linea, pianta, testo, quota |
-| K | calibra sfondo (se presente) |
+| S O F | piastra, pozzetto, foto sul posto |
+| K | calibra l'immagine selezionata |
+| [ ] (+Maiusc) | ruota piastra, pozzetto o immagine di 15° (1°) |
 | Invio / doppio clic | chiude forma o linea |
 | Esc | annulla disegno / deseleziona |
 | Canc | elimina selezione |
@@ -36,7 +43,7 @@ Planner self-hosted per gli schemi del giardino (e in futuro della casa), sullo 
 Tutto sta nel volume `hydraplan-data`:
 
 - `/data/hydraplan.json`: progetti e piante personalizzate;
-- `/data/uploads/`: immagini di sfondo. Quelle non più usate vengono cancellate.
+- `/data/uploads/`: immagini sovrapposte e foto. Quelle che nessun progetto usa più vengono cancellate dopo 7 giorni.
 
 La posizione e lo zoom della vista sono ricordati da ogni dispositivo, non dal server.
 

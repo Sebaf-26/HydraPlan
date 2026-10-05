@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.1.0 — 2026-10-05
+
+Impianti, piastre e foto.
+
+- **Corrugati e tubi**: nuovo tipo di linea "Corrugato / tubo" con contenuto (elettrico, dati, acqua, irrigazione, scarico, gas, predisposizione), diametro e profondità. È disegnato alla larghezza reale con il colore del contenuto e un'etichetta lungo il tracciato (es. "Ø63 · elettrico · −40 cm"). Anche irrigazione e cavo elettrico hanno la profondità.
+- **Pozzetti**: nuovo strumento con formati 20×20 … 60×60, profondità, tipo di chiusino e rotazione, numerati P1, P2…
+- **Piastre calpestabili**: nuovo strumento a timbro con formati pronti (40×40, 50×50, 60×60, 40×60, 30×60, Ø40, Ø50), materiale e rotazione. Si ruotano col pallino o con i tasti [ e ].
+- **Più immagini sovrapposte** al posto del singolo sfondo: ognuna si può spostare, ruotare, scalare dall'angolo, rendere trasparente, nascondere, riordinare e calibrare. Gli sfondi della v1.0 vengono migrati in automatico.
+- **Foto raddrizzate**: da una foto scattata di traverso si indicano 4 angoli di un oggetto di misura nota (piastra, chiusino, foglio A4) e l'app la trasforma in una vista dall'alto in scala da sovrapporre al disegno, con lente d'ingrandimento per posizionare i punti.
+- **Foto dei lavori**: ogni oggetto (tubo, pozzetto, aiuola…) può avere foto allegate con data e didascalia, e c'è lo strumento "Foto sul posto" per attaccare foto a un punto della mappa. Dalla foto si può aprire direttamente il raddrizzamento. Le foto (anche HEIC dell'iPhone) vengono convertite in JPEG ridimensionato.
+- **Livelli**: si possono mostrare o nascondere immagini, aree, percorsi, impianti interrati, piastre, piante, testi e foto. La scelta è salvata per progetto su ogni dispositivo.
+- Il riepilogo mostra anche i metri di tubo per contenuto, i pozzetti e le piastre (numero e m²).
+- Server: le immagini non più usate si cancellano dopo 7 giorni, così l'annulla funziona anche dopo averle tolte.
+
+
 ## v1.0.0 — 2026-10-05
 
 Prima versione.

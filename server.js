@@ -1,9 +1,9 @@
 // Zero-dependency server: serves the Vite build from ./dist, stores plans in
-// DATA_DIR/hydraplan.json and background images in DATA_DIR/uploads, proxies
+// DATA_DIR/hydraplan.json and images (overlays, photos) in DATA_DIR/uploads, proxies
 // satellite tiles (Esri World Imagery) and address search (Nominatim).
 // Everything except the login screen requires the ADMIN_USERNAME/ADMIN_PASSWORD session.
 import { createServer } from "node:http";
-import { readFile, writeFile, rename, mkdir, stat, unlink } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, stat, unlink, readdir } from "node:fs/promises";
 import { join, extname, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "node:crypto";
@@ -120,12 +120,13 @@ async function handleLogin(req, res) {
 
 // ---------- storage ----------
 
-let db = { plans: [], plants: [] };
+let db = { plans: [], plants: [], orphans: {} };
 try {
   const loaded = JSON.parse(await readFile(DATA_FILE, "utf8"));
   db = {
     plans: Array.isArray(loaded.plans) ? loaded.plans : [],
-    plants: Array.isArray(loaded.plants) ? loaded.plants : []
+    plants: Array.isArray(loaded.plants) ? loaded.plants : [],
+    orphans: loaded.orphans && typeof loaded.orphans === "object" ? loaded.orphans : {}
   };
 } catch {}
 
@@ -157,8 +158,22 @@ function points(v) {
     .filter(([x, y]) => x !== null && y !== null);
 }
 
+const FILE_RE = /^[\w-]+\.(png|jpg|webp)$/;
+const clamp = (v, lo, hi, fallback) => Math.min(hi, Math.max(lo, num(v, fallback)));
+
+// Photos attached to any element (works documentation): uploaded file + date + caption.
+function photos(v) {
+  if (!Array.isArray(v)) return [];
+  return v
+    .slice(0, 60)
+    .filter((ph) => FILE_RE.test(ph?.file || ""))
+    .map((ph) => ({ file: ph.file, date: date(ph.date), caption: str(ph.caption, 500) }));
+}
+
 function cleanElement(e) {
-  const base = { id: str(e?.id, 64) || randomUUID(), name: str(e?.name, 120), note: str(e?.note, 4000), locked: !!e?.locked };
+  const base = { id: str(e?.id, 64) || randomUUID(), name: str(e?.name, 120), note: str(e?.note, 4000), locked: !!e?.locked, photos: photos(e?.photos) };
+  const x = num(e?.x), y = num(e?.y);
+  const hasXY = x !== null && y !== null;
   switch (e?.type) {
     case "area": {
       const pts = points(e.points);
@@ -168,47 +183,70 @@ function cleanElement(e) {
     case "line": {
       const pts = points(e.points);
       if (pts.length < 2) return null;
-      return { ...base, type: "line", kind: str(e.kind, 30) || "vialetto", color: color(e.color), width: Math.min(20, Math.max(0, num(e.width, 0.1))), points: pts };
+      return {
+        ...base, type: "line", kind: str(e.kind, 30) || "vialetto", color: color(e.color), width: clamp(e.width, 0, 20, 0.1), points: pts,
+        // pipes / ducts: content, diameter in mm, depth in cm
+        content: str(e.content, 30), diameter: clamp(e.diameter, 0, 2000, 0), depth: clamp(e.depth, 0, 1000, 0)
+      };
     }
-    case "plant": {
-      const x = num(e.x), y = num(e.y);
-      if (x === null || y === null) return null;
-      return { ...base, type: "plant", plantId: str(e.plantId, 64), x, y, d: Math.min(60, Math.max(0.05, num(e.d, 1))), color: color(e.color), planted: date(e.planted) };
-    }
-    case "label": {
-      const x = num(e.x), y = num(e.y);
-      if (x === null || y === null || !str(e.text)) return null;
-      return { ...base, type: "label", x, y, text: str(e.text, 300), size: Math.min(20, Math.max(0.1, num(e.size, 0.6))), color: color(e.color) };
-    }
+    case "plant":
+      if (!hasXY) return null;
+      return { ...base, type: "plant", plantId: str(e.plantId, 64), x, y, d: clamp(e.d, 0.05, 60, 1), color: color(e.color), planted: date(e.planted) };
+    case "label":
+      if (!hasXY || !str(e.text)) return null;
+      return { ...base, type: "label", x, y, text: str(e.text, 300), size: clamp(e.size, 0.1, 20, 0.6), color: color(e.color) };
     case "dim": {
       const pts = points(e.points);
       if (pts.length !== 2) return null;
       return { ...base, type: "dim", points: pts };
     }
+    case "stone":
+      if (!hasXY) return null;
+      return {
+        ...base, type: "stone", x, y, w: clamp(e.w, 0.05, 20, 0.4), h: clamp(e.h, 0.05, 20, 0.4), rotation: clamp(e.rotation, -360, 360, 0),
+        shape: e.shape === "round" ? "round" : "rect", material: str(e.material, 60), color: color(e.color)
+      };
+    case "pozzetto":
+      if (!hasXY) return null;
+      return {
+        ...base, type: "pozzetto", x, y, w: clamp(e.w, 0.05, 5, 0.4), h: clamp(e.h, 0.05, 5, 0.4), rotation: clamp(e.rotation, -360, 360, 0),
+        depth: clamp(e.depth, 0, 1000, 0), cover: str(e.cover, 60), color: color(e.color)
+      };
+    case "photo":
+      if (!hasXY) return null;
+      return { ...base, type: "photo", x, y };
     default:
       return null;
   }
 }
 
-function cleanBackground(b) {
-  if (!b || !/^[\w-]+\.(png|jpg|webp)$/.test(b.file || "")) return null;
-  const width = num(b.width), height = num(b.height);
+// Images laid over the plan (satellite, floor plans, rectified photos), drawn in list order.
+function cleanOverlay(o) {
+  if (!o || !FILE_RE.test(o.file || "")) return null;
+  const width = num(o.width), height = num(o.height);
   if (!(width > 0) || !(height > 0)) return null;
   return {
-    file: b.file,
-    x: num(b.x, 0),
-    y: num(b.y, 0),
+    id: str(o.id, 64) || randomUUID(),
+    file: o.file,
+    name: str(o.name, 120) || "Immagine",
+    x: num(o.x, 0),
+    y: num(o.y, 0),
     width,
     height,
-    opacity: Math.min(1, Math.max(0.05, num(b.opacity, 0.8))),
-    locked: b.locked !== false,
-    source: str(b.source, 300)
+    rotation: clamp(o.rotation, -360, 360, 0),
+    opacity: clamp(o.opacity, 0.05, 1, 0.8),
+    locked: o.locked !== false,
+    hidden: !!o.hidden,
+    source: str(o.source, 300),
+    date: date(o.date)
   };
 }
 
 function cleanPlan(p, id, previous) {
   if (!str(p?.name)) return null;
   const now = new Date().toISOString();
+  // v1.0 had a single `background`: it becomes the first overlay.
+  const overlays = Array.isArray(p.overlays) ? p.overlays : p.background ? [{ ...p.background, name: "Sfondo" }] : [];
   return {
     id,
     name: str(p.name, 120),
@@ -216,11 +254,11 @@ function cleanPlan(p, id, previous) {
     notes: str(p.notes, 10000),
     created: previous?.created || now,
     updated: now,
-    grid: Math.min(10, Math.max(0.05, num(p.grid, 1))),
+    grid: clamp(p.grid, 0.05, 10, 1),
     snap: p.snap !== false,
-    snapStep: Math.min(10, Math.max(0.01, num(p.snapStep, 0.1))),
-    background: cleanBackground(p.background),
-    elements: Array.isArray(p.elements) ? p.elements.slice(0, 5000).map(cleanElement).filter(Boolean) : []
+    snapStep: clamp(p.snapStep, 0.01, 10, 0.1),
+    overlays: overlays.slice(0, 100).map(cleanOverlay).filter(Boolean),
+    elements: Array.isArray(p.elements) ? p.elements.slice(0, 10000).map(cleanElement).filter(Boolean) : []
   };
 }
 
@@ -244,7 +282,7 @@ const summary = (p) => ({
   kind: p.kind,
   created: p.created,
   updated: p.updated,
-  background: p.background ? { file: p.background.file } : null,
+  thumb: p.overlays.find((o) => !o.hidden)?.file || null,
   counts: {
     plants: p.elements.filter((e) => e.type === "plant").length,
     areas: p.elements.filter((e) => e.type === "area").length,
@@ -252,11 +290,43 @@ const summary = (p) => ({
   }
 });
 
-// Delete images no plan references any more (after a plan is removed or its background replaced).
-async function removeIfOrphan(file) {
-  if (!file || db.plans.some((p) => p.background?.file === file)) return;
-  await unlink(join(UPLOADS, file)).catch(() => {});
+// Uploads no plan references any more are kept for a week (so undo after deleting
+// an image still works), then removed.
+function referencedFiles() {
+  const set = new Set();
+  for (const p of db.plans) {
+    p.overlays.forEach((o) => set.add(o.file));
+    p.elements.forEach((e) => e.photos?.forEach((ph) => set.add(ph.file)));
+  }
+  return set;
 }
+
+async function collectGarbage() {
+  const used = referencedFiles();
+  const now = Date.now();
+  let changed = false;
+  for (const file of await readdir(UPLOADS).catch(() => [])) {
+    if (used.has(file)) {
+      if (db.orphans[file]) delete db.orphans[file], (changed = true);
+    } else if (!db.orphans[file]) {
+      db.orphans[file] = now;
+      changed = true;
+    } else if (now - db.orphans[file] > 7 * 864e5) {
+      await unlink(join(UPLOADS, file)).catch(() => {});
+      delete db.orphans[file];
+      changed = true;
+    }
+  }
+  if (changed) await persist();
+}
+setInterval(() => collectGarbage().catch((e) => console.error("gc", e)), 6 * 3600e3);
+
+// One-time upgrade of plans saved by v1.0 (single `background` → `overlays`).
+if (db.plans.some((p) => !Array.isArray(p.overlays))) {
+  db.plans = db.plans.map((p) => (Array.isArray(p.overlays) ? p : { ...cleanPlan(p, p.id, p), updated: p.updated }));
+  await persist();
+}
+await collectGarbage();
 
 // ---------- helpers ----------
 
@@ -354,13 +424,11 @@ async function handleApi(req, res, url) {
       const plan = cleanPlan(await jsonBody(req), previous.id, previous);
       if (!plan) return sendJson(res, 400, { error: "Nome obbligatorio" });
       db.plans[idx] = plan;
-      if (previous.background?.file !== plan.background?.file) await removeIfOrphan(previous.background?.file);
       await persist();
       return sendJson(res, 200, { updated: plan.updated });
     }
     if (req.method === "DELETE") {
-      const [removed] = db.plans.splice(idx, 1);
-      await removeIfOrphan(removed.background?.file);
+      db.plans.splice(idx, 1);
       await persist();
       return sendJson(res, 200, { ok: true });
     }

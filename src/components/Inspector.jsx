@@ -1,7 +1,13 @@
 import React, { useMemo, useState } from "react";
-import { AREA_KINDS, LINE_KINDS, PLANT_CATS, PLAN_KINDS } from "../catalog.js";
+import {
+  AREA_KINDS, LINE_KINDS, PIPE_CONTENTS, PIPE_DIAMETERS, PLANT_CATS, PLAN_KINDS, POZZETTO_COVERS, POZZETTO_PRESETS,
+  STONE_MATERIALS, STONE_PRESETS, UTILITY_KINDS
+} from "../catalog.js";
+import { LAYERS, layerOf } from "../layers.js";
+import { uploadPhotos } from "../photos.js";
+import { uploadUrl } from "../api.js";
 import { dist, fmtM, fmtM2, pathLength, polygonArea } from "../geometry.js";
-import { plantColor } from "./PlanCanvas.jsx";
+import { lineColor, plantColor } from "./PlanCanvas.jsx";
 import { go } from "../router.js";
 
 const num = (v) => Number(String(v).replace(",", "."));
@@ -72,14 +78,136 @@ function KindChips({ kinds, value, onPick }) {
   );
 }
 
-function ElementPanel({ e, plants, updateElement, removeElement, duplicate, reorder }) {
+function PipeFields({ value, onChange }) {
+  return (
+    <>
+      <div className="cat-title small">Contenuto</div>
+      <KindChips kinds={Object.fromEntries(Object.entries(PIPE_CONTENTS).map(([k, v]) => [k, { label: v.label, color: v.color }]))} value={value.content} onPick={(content) => onChange({ content })} />
+      <div className="two">
+        <label>
+          Diametro
+          <select value={value.diameter} onChange={(ev) => onChange({ diameter: Number(ev.target.value) })}>
+            <option value={0}>non indicato</option>
+            {PIPE_DIAMETERS.map((d) => <option key={d} value={d}>Ø {d} mm</option>)}
+          </select>
+        </label>
+        <NumberField label="Profondità" value={value.depth || 0} onChange={(depth) => onChange({ depth })} step={5} suffix="cm" />
+      </div>
+    </>
+  );
+}
+
+function RotationField({ value, onChange }) {
+  return (
+    <label>
+      Rotazione · {Math.round(value || 0)}°
+      <input type="range" min="-180" max="180" step="1" value={value || 0} onChange={(ev) => onChange(Number(ev.target.value))} />
+    </label>
+  );
+}
+
+// Photos of works attached to an element (or a photo pin): thumbnails, add, full view.
+function PhotosSection({ e, updateElement, onRectify, onError }) {
+  const [open, setOpen] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const list = e.photos || [];
+  const setPhotos = (photos) => updateElement(e.id, { photos });
+
+  async function add(ev) {
+    const files = [...(ev.target.files || [])];
+    ev.target.value = "";
+    if (!files.length) return;
+    setBusy(true);
+    try {
+      setPhotos([...list, ...(await uploadPhotos(files))]);
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ph = open !== null ? list[open] : null;
+  return (
+    <div className="photos">
+      <div className="cat-title small">Foto {list.length ? `(${list.length})` : ""}</div>
+      <div className="thumbs">
+        {list.map((p, i) => (
+          <button key={p.file} className="thumb-btn" onClick={() => setOpen(i)} title={p.caption || p.date}>
+            <img src={uploadUrl(p.file)} alt="" loading="lazy" />
+          </button>
+        ))}
+        <label className="thumb-btn add">
+          <input type="file" accept="image/*" multiple hidden onChange={add} />
+          {busy ? "…" : "+"}
+        </label>
+      </div>
+      {ph && (
+        <div className="modal-backdrop" onPointerDown={(ev) => ev.target === ev.currentTarget && setOpen(null)}>
+          <div className="modal card wide lightbox">
+            <div className="row">
+              <button className="ghost" disabled={open === 0} onClick={() => setOpen(open - 1)}>‹</button>
+              <span className="grow muted small center">{open + 1} / {list.length}</span>
+              <button className="ghost" disabled={open === list.length - 1} onClick={() => setOpen(open + 1)}>›</button>
+              <button className="ghost" onClick={() => setOpen(null)}>×</button>
+            </div>
+            <img src={uploadUrl(ph.file)} alt={ph.caption} />
+            <div className="two">
+              <label>Didascalia<input value={ph.caption} placeholder="es. scavo prima del rinterro" onChange={(ev) => setPhotos(list.map((q, i) => (i === open ? { ...q, caption: ev.target.value } : q)))} /></label>
+              <label>Data<input type="date" value={ph.date} onChange={(ev) => setPhotos(list.map((q, i) => (i === open ? { ...q, date: ev.target.value } : q)))} /></label>
+            </div>
+            <div className="row wrap">
+              <button className="ghost small" onClick={() => { setOpen(null); onRectify(uploadUrl(ph.file)); }}>Raddrizza e sovrapponi al disegno</button>
+              <a className="ghost small btn-link" href={uploadUrl(ph.file)} target="_blank" rel="noreferrer">Apri originale</a>
+              <span className="spacer" />
+              <button className="ghost small danger" onClick={() => { if (confirm("Togliere questa foto?")) { setPhotos(list.filter((_, i) => i !== open)); setOpen(null); } }}>Elimina</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OverlayPanel({ o, updateElement, removeElement, reorder, startCalibrate }) {
+  const set = (patch) => updateElement(o.id, patch);
+  return (
+    <div className="panel-section">
+      <h3>Immagine sovrapposta</h3>
+      <label>Nome<input value={o.name} onChange={(ev) => set({ name: ev.target.value })} /></label>
+      <p className="muted small">{fmtM(o.width)} × {fmtM(o.height)}{o.source ? " · " + o.source : ""}</p>
+      <label>
+        Opacità
+        <input type="range" min="0.05" max="1" step="0.05" value={o.opacity} onChange={(ev) => set({ opacity: Number(ev.target.value) })} />
+      </label>
+      <RotationField value={o.rotation} onChange={(rotation) => set({ rotation })} />
+      <NumberField label="Larghezza reale" value={o.width} onChange={(w) => w > 0 && set({ x: o.x + (o.width - w) / 2, y: o.y + (o.height - (o.height * w) / o.width) / 2, width: w, height: (o.height * w) / o.width })} step={0.5} />
+      <label className="check"><input type="checkbox" checked={!o.locked} onChange={(ev) => set({ locked: !ev.target.checked })} /> Spostabile (trascina, ruota col pallino, scala dall'angolo)</label>
+      <label className="check"><input type="checkbox" checked={o.hidden} onChange={(ev) => set({ hidden: ev.target.checked })} /> Nascosta</label>
+      <label>Data<input type="date" value={o.date || ""} onChange={(ev) => set({ date: ev.target.value })} /></label>
+      <div className="row wrap">
+        <button className="ghost small" onClick={startCalibrate}>Calibra con una misura</button>
+        <button className="ghost small" onClick={() => reorder(o.id, true)}>Porta sopra</button>
+        <button className="ghost small" onClick={() => reorder(o.id, false)}>Porta sotto</button>
+        <button className="ghost small danger" onClick={() => confirm("Togliere questa immagine?") && removeElement(o.id)}>Elimina</button>
+      </div>
+    </div>
+  );
+}
+
+function ElementPanel({ e, plants, updateElement, removeElement, duplicate, reorder, onRectify, onError }) {
   const set = (patch) => updateElement(e.id, patch);
   const species = e.type === "plant" ? plants.get(e.plantId) : null;
-  const title = { area: "Area", line: "Linea", plant: "Pianta", label: "Testo", dim: "Quota" }[e.type];
+  const title = {
+    area: "Area", line: LINE_KINDS[e.kind]?.pipe ? "Tubo / corrugato" : "Linea", plant: "Pianta", label: "Testo", dim: "Quota",
+    stone: "Piastra", pozzetto: "Pozzetto", photo: "Foto sul posto"
+  }[e.type];
   const defaultColor =
     e.type === "area" ? (AREA_KINDS[e.kind] || AREA_KINDS.altro).fill :
-    e.type === "line" ? (LINE_KINDS[e.kind] || LINE_KINDS.vialetto).color :
-    e.type === "plant" ? plantColor({}, species) : "#333333";
+    e.type === "line" ? lineColor({ ...e, color: "" }) :
+    e.type === "plant" ? plantColor({}, species) :
+    e.type === "stone" ? STONE_MATERIALS[e.material]?.color || "#b9b3a6" :
+    e.type === "pozzetto" ? "#8d8d8d" : "#333333";
 
   return (
     <div className="panel-section">
@@ -99,10 +227,57 @@ function ElementPanel({ e, plants, updateElement, removeElement, duplicate, reor
         <>
           <div className="measures">
             <div><span className="muted small">Lunghezza</span><strong>{fmtM(pathLength(e.points))}</strong></div>
-            {e.width > 0 && <div><span className="muted small">Superficie</span><strong>{fmtM2(pathLength(e.points) * e.width)}</strong></div>}
+            {e.width > 0 && !UTILITY_KINDS.has(e.kind) && <div><span className="muted small">Superficie</span><strong>{fmtM2(pathLength(e.points) * e.width)}</strong></div>}
           </div>
-          <KindChips kinds={LINE_KINDS} value={e.kind} onPick={(kind) => set({ kind, width: LINE_KINDS[kind].width || 0 })} />
-          <NumberField label="Larghezza (0 = linea sottile)" value={e.width} onChange={(width) => set({ width })} step={0.05} />
+          <KindChips kinds={LINE_KINDS} value={e.kind} onPick={(kind) => set({ kind, width: LINE_KINDS[kind].width || 0, ...(kind === "corrugato" && !e.content ? { content: "elettrico" } : {}) })} />
+          {LINE_KINDS[e.kind]?.pipe ? (
+            <PipeFields value={e} onChange={set} />
+          ) : UTILITY_KINDS.has(e.kind) ? (
+            <NumberField label="Profondità" value={e.depth || 0} onChange={(depth) => set({ depth })} step={5} suffix="cm" />
+          ) : (
+            <NumberField label="Larghezza (0 = linea sottile)" value={e.width} onChange={(width) => set({ width })} step={0.05} />
+          )}
+        </>
+      )}
+
+      {e.type === "stone" && (
+        <>
+          <div className="chips">
+            {STONE_PRESETS.map((p) => (
+              <button key={p.label} className={"chip" + (p.w === e.w && p.h === e.h && p.shape === e.shape ? " active" : "")} onClick={() => set({ w: p.w, h: p.h, shape: p.shape })}>{p.label}</button>
+            ))}
+          </div>
+          <div className="two">
+            <NumberField label="Larghezza" value={e.w} onChange={(w) => w > 0.04 && set({ w })} step={0.05} />
+            <NumberField label="Lunghezza" value={e.h} onChange={(h) => h > 0.04 && set({ h })} step={0.05} />
+          </div>
+          <RotationField value={e.rotation} onChange={(rotation) => set({ rotation })} />
+          <KindChips kinds={STONE_MATERIALS} value={e.material} onPick={(material) => set({ material })} />
+        </>
+      )}
+
+      {e.type === "pozzetto" && (
+        <>
+          <div className="chips">
+            {POZZETTO_PRESETS.map((p) => (
+              <button key={p.label} className={"chip" + (p.w === e.w && p.h === e.h ? " active" : "")} onClick={() => set({ w: p.w, h: p.h })}>{p.label}</button>
+            ))}
+          </div>
+          <div className="two">
+            <NumberField label="Larghezza" value={e.w} onChange={(w) => w > 0.04 && set({ w })} step={0.05} />
+            <NumberField label="Lunghezza" value={e.h} onChange={(h) => h > 0.04 && set({ h })} step={0.05} />
+          </div>
+          <div className="two">
+            <NumberField label="Profondità" value={e.depth || 0} onChange={(depth) => set({ depth })} step={5} suffix="cm" />
+            <label>
+              Chiusino
+              <select value={e.cover} onChange={(ev) => set({ cover: ev.target.value })}>
+                <option value="">—</option>
+                {POZZETTO_COVERS.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </label>
+          </div>
+          <RotationField value={e.rotation} onChange={(rotation) => set({ rotation })} />
         </>
       )}
 
@@ -144,14 +319,15 @@ function ElementPanel({ e, plants, updateElement, removeElement, duplicate, reor
       {e.type !== "dim" && e.type !== "label" && (
         <label>Nome<input value={e.name} placeholder={e.type === "plant" ? species?.name : "es. Aiuola nord"} onChange={(ev) => set({ name: ev.target.value })} /></label>
       )}
-      {e.type !== "dim" && (
+      {e.type !== "dim" && e.type !== "photo" && (
         <label className="color-row">
           Colore
           <input type="color" value={e.color || defaultColor} onChange={(ev) => set({ color: ev.target.value })} />
           {e.color && <button className="link small" onClick={() => set({ color: "" })}>predefinito</button>}
         </label>
       )}
-      <label>Note<textarea rows="3" value={e.note} onChange={(ev) => set({ note: ev.target.value })} placeholder="Annotazioni, lavori da fare…" /></label>
+      <label>Note<textarea rows="3" value={e.note} onChange={(ev) => set({ note: ev.target.value })} placeholder={e.type === "pozzetto" ? "Cosa c'è dentro, da dove arrivano i tubi…" : "Annotazioni, lavori da fare…"} /></label>
+      {e.type !== "dim" && e.type !== "label" && <PhotosSection e={e} updateElement={updateElement} onRectify={onRectify} onError={onError} />}
       <label className="check"><input type="checkbox" checked={e.locked} onChange={(ev) => set({ locked: ev.target.checked })} /> Bloccato (non si sposta per sbaglio)</label>
 
       <div className="row wrap">
@@ -164,24 +340,46 @@ function ElementPanel({ e, plants, updateElement, removeElement, duplicate, reor
   );
 }
 
-function PlanPanel({ plan, plants, change, openBackground, startCalibrate, onSelect }) {
+function PlanPanel({ plan, plants, change, openBackground, onSelect, hidden, setHidden }) {
   const set = (patch) => change((p) => ({ ...p, ...patch }));
-  const bg = plan.background;
-  const setBg = (patch) => change((p) => ({ ...p, background: { ...p.background, ...patch } }));
+  const setOv = (id, patch) => change((p) => ({ ...p, overlays: p.overlays.map((o) => (o.id === id ? { ...o, ...patch } : o)) }));
 
   const stats = useMemo(() => {
     const areas = {};
     const species = {};
+    const pipes = {};
+    let pozzetti = 0, stones = 0, stonesM2 = 0, photos = 0;
     for (const e of plan.elements) {
+      photos += e.photos?.length || 0;
       if (e.type === "area") areas[e.kind] = (areas[e.kind] || 0) + polygonArea(e.points);
       if (e.type === "plant") {
         const s = (species[e.plantId] ||= { count: 0, ids: [] });
         s.count++;
         s.ids.push(e.id);
       }
+      if (e.type === "line" && UTILITY_KINDS.has(e.kind)) {
+        const key = LINE_KINDS[e.kind].pipe ? e.content || "vuoto" : e.kind;
+        pipes[key] = (pipes[key] || 0) + pathLength(e.points);
+      }
+      if (e.type === "pozzetto") pozzetti++;
+      if (e.type === "stone") {
+        stones++;
+        stonesM2 += e.shape === "round" ? (Math.PI * e.w * e.h) / 4 : e.w * e.h;
+      }
     }
-    return { areas, species };
+    return { areas, species, pipes, pozzetti, stones, stonesM2, photos };
   }, [plan.elements]);
+
+  const toggle = (k) => {
+    const next = new Set(hidden);
+    next.has(k) ? next.delete(k) : next.add(k);
+    setHidden(next);
+  };
+  const counts = useMemo(() => {
+    const c = { immagini: plan.overlays.length };
+    for (const e of plan.elements) c[layerOf(e)] = (c[layerOf(e)] || 0) + 1;
+    return c;
+  }, [plan.elements, plan.overlays]);
 
   return (
     <>
@@ -212,36 +410,43 @@ function PlanPanel({ plan, plants, change, openBackground, startCalibrate, onSel
       </div>
 
       <div className="panel-section">
-        <h3>Sfondo</h3>
-        {bg ? (
-          <>
-            <p className="muted small">{fmtM(bg.width)} × {fmtM(bg.height)}{bg.source ? " · " + bg.source : ""}</p>
-            <label>
-              Opacità
-              <input type="range" min="0.05" max="1" step="0.05" value={bg.opacity} onChange={(e) => setBg({ opacity: Number(e.target.value) })} />
-            </label>
-            <label className="check"><input type="checkbox" checked={!bg.locked} onChange={(e) => setBg({ locked: !e.target.checked })} /> Sposta lo sfondo trascinandolo</label>
-            <NumberField label="Larghezza reale dello sfondo" value={bg.width} onChange={(w) => w > 0 && setBg({ width: w, height: (bg.height * w) / bg.width })} step={0.5} />
-            <div className="row wrap">
-              <button className="ghost small" onClick={startCalibrate}>Calibra con una misura</button>
-              <button className="ghost small" onClick={openBackground}>Sostituisci</button>
-              <button className="ghost small danger" onClick={() => confirm("Togliere lo sfondo?") && set({ background: null })}>Rimuovi</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="muted small">Metti sotto il disegno una foto, una planimetria o la vista satellitare, poi ricalca.</p>
-            <button className="ghost" onClick={openBackground}>+ Aggiungi sfondo</button>
-          </>
-        )}
+        <h3>Immagini sovrapposte</h3>
+        {plan.overlays.length === 0 && <p className="muted small">Satellite, planimetrie, foto dall'alto o foto raddrizzate da mettere sotto il disegno per ricalcare.</p>}
+        {[...plan.overlays].reverse().map((o) => (
+          <div key={o.id} className="ov-row">
+            <button className={"eye" + (o.hidden ? " off" : "")} onClick={() => setOv(o.id, { hidden: !o.hidden })} title={o.hidden ? "Mostra" : "Nascondi"}>{o.hidden ? "◌" : "●"}</button>
+            <img src={uploadUrl(o.file)} alt="" />
+            <button className="grow ov-name" onClick={() => onSelect(o.id)}>{o.name}<span className="muted small">{o.locked ? " · bloccata" : ""}</span></button>
+          </div>
+        ))}
+        <button className="ghost" onClick={openBackground}>+ Aggiungi immagine o foto</button>
+      </div>
+
+      <div className="panel-section">
+        <h3>Mostra</h3>
+        {Object.entries(LAYERS).map(([k, label]) => (
+          <label key={k} className="check">
+            <input type="checkbox" checked={!hidden.has(k)} onChange={() => toggle(k)} /> {label}
+            <span className="spacer" /><span className="muted small">{counts[k] || 0}</span>
+          </label>
+        ))}
       </div>
 
       <div className="panel-section">
         <h3>Riepilogo</h3>
-        {Object.keys(stats.areas).length === 0 && Object.keys(stats.species).length === 0 && <p className="muted small">Ancora vuoto: scegli uno strumento a sinistra e inizia a disegnare.</p>}
+        {plan.elements.length === 0 && <p className="muted small">Ancora vuoto: scegli uno strumento a sinistra e inizia a disegnare.</p>}
         {Object.entries(stats.areas).map(([k, m2]) => (
           <div key={k} className="stat-row"><span className="dot" style={{ background: AREA_KINDS[k]?.fill }} />{AREA_KINDS[k]?.label || k}<span className="spacer" /><strong>{fmtM2(m2)}</strong></div>
         ))}
+        {(Object.keys(stats.pipes).length > 0 || stats.pozzetti > 0) && <div className="cat-title small">Impianti</div>}
+        {Object.entries(stats.pipes).map(([k, m]) => (
+          <div key={k} className="stat-row">
+            <span className="dot" style={{ background: PIPE_CONTENTS[k]?.color || LINE_KINDS[k]?.color }} />
+            {PIPE_CONTENTS[k]?.label || LINE_KINDS[k]?.label}<span className="spacer" /><strong>{fmtM(m)}</strong>
+          </div>
+        ))}
+        {stats.pozzetti > 0 && <div className="stat-row"><span className="dot" style={{ background: "#bbb" }} />Pozzetti<span className="spacer" /><strong>× {stats.pozzetti}</strong></div>}
+        {stats.stones > 0 && <div className="stat-row"><span className="dot" style={{ background: "#b9b3a6" }} />Piastre<span className="spacer" /><strong>× {stats.stones} · {fmtM2(stats.stonesM2)}</strong></div>}
         {Object.keys(stats.species).length > 0 && <div className="cat-title small">Piante</div>}
         {Object.entries(stats.species)
           .sort((a, b) => b[1].count - a[1].count)
@@ -253,6 +458,7 @@ function PlanPanel({ plan, plants, change, openBackground, startCalibrate, onSel
               <strong>× {s.count}</strong>
             </button>
           ))}
+        {stats.photos > 0 && <div className="stat-row muted small">Foto dei lavori allegate: {stats.photos}</div>}
       </div>
 
       <div className="panel-section">
@@ -264,9 +470,11 @@ function PlanPanel({ plan, plants, change, openBackground, startCalibrate, onSel
 }
 
 export default function Inspector(props) {
-  const { selected, tool, plants, plantId, setPlantId, areaKind, setAreaKind, lineKind, setLineKind, onClose } = props;
+  const { selected, tool, plants, plantId, setPlantId, areaKind, setAreaKind, lineKind, setLineKind, onClose,
+    stoneOpts, setStoneOpts, pozzOpts, setPozzOpts, pipeOpts, setPipeOpts } = props;
   let body;
-  if (selected) body = <ElementPanel e={selected} {...props} />;
+  if (selected?.file) body = <OverlayPanel o={selected} {...props} />;
+  else if (selected) body = <ElementPanel e={selected} {...props} />;
   else if (tool === "plant")
     body = (
       <div className="panel-section">
@@ -287,6 +495,54 @@ export default function Inspector(props) {
       <div className="panel-section">
         <h3>Tipo di linea</h3>
         <KindChips kinds={LINE_KINDS} value={lineKind} onPick={setLineKind} />
+        {lineKind === "corrugato" && <PipeFields value={pipeOpts} onChange={(patch) => setPipeOpts({ ...pipeOpts, ...patch })} />}
+        {(lineKind === "irrigazione" || lineKind === "elettrico") && (
+          <NumberField label="Profondità" value={pipeOpts.depth} onChange={(depth) => setPipeOpts({ ...pipeOpts, depth })} step={5} suffix="cm" />
+        )}
+        {UTILITY_KINDS.has(lineKind) && <p className="muted small">Segui il percorso dello scavo clic dopo clic; doppio clic per finire. Puoi allegare le foto dello scavo aperto.</p>}
+      </div>
+    );
+  else if (tool === "stone")
+    body = (
+      <div className="panel-section">
+        <h3>Piastre</h3>
+        <div className="chips">
+          {STONE_PRESETS.map((p) => (
+            <button key={p.label} className={"chip" + (p.w === stoneOpts.w && p.h === stoneOpts.h && p.shape === stoneOpts.shape ? " active" : "")} onClick={() => setStoneOpts({ ...stoneOpts, w: p.w, h: p.h, shape: p.shape })}>{p.label}</button>
+          ))}
+        </div>
+        <div className="two">
+          <NumberField label="Larghezza" value={stoneOpts.w} onChange={(w) => w > 0.04 && setStoneOpts({ ...stoneOpts, w })} step={0.05} />
+          <NumberField label="Lunghezza" value={stoneOpts.h} onChange={(h) => h > 0.04 && setStoneOpts({ ...stoneOpts, h })} step={0.05} />
+        </div>
+        <RotationField value={stoneOpts.rotation} onChange={(rotation) => setStoneOpts({ ...stoneOpts, rotation })} />
+        <KindChips kinds={STONE_MATERIALS} value={stoneOpts.material} onPick={(material) => setStoneOpts({ ...stoneOpts, material })} />
+        <p className="muted small">Clicca per posarle una alla volta. Con una foto raddrizzata sotto puoi ricalcarle esattamente dove sono.</p>
+      </div>
+    );
+  else if (tool === "pozzetto")
+    body = (
+      <div className="panel-section">
+        <h3>Pozzetto</h3>
+        <div className="chips">
+          {POZZETTO_PRESETS.map((p) => (
+            <button key={p.label} className={"chip" + (p.w === pozzOpts.w && p.h === pozzOpts.h ? " active" : "")} onClick={() => setPozzOpts({ ...pozzOpts, w: p.w, h: p.h })}>{p.label}</button>
+          ))}
+        </div>
+        <label>
+          Chiusino
+          <select value={pozzOpts.cover} onChange={(ev) => setPozzOpts({ ...pozzOpts, cover: ev.target.value })}>
+            {POZZETTO_COVERS.map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </label>
+        <p className="muted small">Dopo averlo messo puoi scrivere profondità, cosa contiene e allegare le foto.</p>
+      </div>
+    );
+  else if (tool === "photo")
+    body = (
+      <div className="panel-section">
+        <h3>Foto sul posto</h3>
+        <p className="muted small">Clicca un punto del disegno e scegli una o più foto (anche dalla fotocamera): restano attaccate a quel punto, con data e didascalia. Utile per gli scavi prima del rinterro.</p>
       </div>
     );
   else body = <PlanPanel {...props} />;

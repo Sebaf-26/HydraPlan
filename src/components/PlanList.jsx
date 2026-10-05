@@ -76,8 +76,8 @@ export default function PlanList({ onError, onLogout }) {
             {[...plans].sort((a, b) => b.updated.localeCompare(a.updated)).map((p) => (
               <li key={p.id} className="plan-card card">
                 <button className="plan-open" onClick={() => go("plan/" + p.id)}>
-                  <div className="thumb" style={p.background ? { backgroundImage: `url(${uploadUrl(p.background.file)})` } : undefined}>
-                    {!p.background && <span>{PLAN_KINDS[p.kind]?.[0]}</span>}
+                  <div className="thumb" style={p.thumb ? { backgroundImage: `url(${uploadUrl(p.thumb)})` } : undefined}>
+                    {!p.thumb && <span>{PLAN_KINDS[p.kind]?.[0]}</span>}
                   </div>
                   <div className="plan-meta">
                     <strong>{p.name}</strong>
